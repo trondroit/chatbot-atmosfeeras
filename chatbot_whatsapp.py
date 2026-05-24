@@ -18,7 +18,6 @@ ODOO_API_KEY    = os.environ.get("ODOO_API_KEY")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Memoria de conversaciones por número de teléfono
 conversaciones = {}
 
 SYSTEM_PROMPT = """
@@ -94,10 +93,9 @@ def enviar_whatsapp(telefono: str, mensaje: str):
     return resp
 
 
-def registrar_en_odoo(telefono: str, mensaje_cliente: str, respuesta_ia: str):
-    """Registra la respuesta de la IA en el hilo de WhatsApp en Odoo."""
+def registrar_en_odoo(telefono: str, respuesta_ia: str):
+    """Registra la respuesta de la IA en Odoo."""
     try:
-        # Autenticación con Odoo
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
 
@@ -107,41 +105,30 @@ def registrar_en_odoo(telefono: str, mensaje_cliente: str, respuesta_ia: str):
 
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
-        # Buscar el mensaje más reciente del cliente por teléfono
+        # Primero exploramos los campos disponibles en whatsapp.message
+        campos = models.execute_kw(
+            ODOO_DB, uid, ODOO_API_KEY,
+            "whatsapp.message", "fields_get",
+            [],
+            {"attributes": ["string", "type"]}
+        )
+        print(f"[Odoo] Campos disponibles: {list(campos.keys())}")
+
+        # Buscar mensaje reciente del cliente
         mensajes = models.execute_kw(
             ODOO_DB, uid, ODOO_API_KEY,
             "whatsapp.message", "search_read",
             [[["mobile_number", "=", telefono]]],
-            {"fields": ["id", "wa_discuss_channel_id"], "order": "id desc", "limit": 1}
+            {"fields": list(campos.keys()), "order": "id desc", "limit": 1}
         )
 
-        if not mensajes:
-            print(f"[Odoo] No se encontró canal para {telefono}")
-            return
-
-        canal_id = mensajes[0].get("wa_discuss_channel_id")
-        if not canal_id:
-            print("[Odoo] No se encontró wa_discuss_channel_id")
-            return
-
-        canal_id = canal_id[0] if isinstance(canal_id, list) else canal_id
-
-        # Registrar la respuesta de la IA como mensaje saliente en Odoo
-        models.execute_kw(
-            ODOO_DB, uid, ODOO_API_KEY,
-            "whatsapp.message", "create",
-            [{
-                "body": respuesta_ia,
-                "message_type": "outbound",
-                "state": "sent",
-                "mobile_number": telefono,
-                "wa_discuss_channel_id": canal_id,
-            }]
-        )
-        print(f"[Odoo] Respuesta registrada en canal {canal_id}")
+        if mensajes:
+            print(f"[Odoo] Mensaje encontrado: {mensajes[0]}")
+        else:
+            print(f"[Odoo] No se encontró mensaje para {telefono}")
 
     except Exception as e:
-        print(f"[Odoo] Error al registrar: {e}")
+        print(f"[Odoo] Error: {e}")
 
 
 # ─── VERIFICACIÓN DEL WEBHOOK ───
@@ -196,11 +183,8 @@ def recibir_mensaje():
     respuesta = obtener_respuesta_ia(telefono, texto)
     print(f"[IA] Respuesta: {respuesta}")
 
-    # Enviar por WhatsApp
     enviar_whatsapp(telefono, respuesta)
-
-    # Registrar respuesta en Odoo
-    registrar_en_odoo(telefono, texto, respuesta)
+    registrar_en_odoo(telefono, respuesta)
 
     return jsonify({"status": "ok"}), 200
 
