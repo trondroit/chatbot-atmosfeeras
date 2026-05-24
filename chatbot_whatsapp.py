@@ -1,5 +1,7 @@
 import os
+import re
 import requests
+import xmlrpc.client
 from flask import Flask, request, jsonify
 from openai import OpenAI
 
@@ -9,6 +11,10 @@ VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN")
 WHATSAPP_TOKEN  = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 OPENAI_API_KEY  = os.environ.get("OPENAI_API_KEY")
+ODOO_URL        = os.environ.get("ODOO_URL")
+ODOO_DB         = os.environ.get("ODOO_DB")
+ODOO_USER       = os.environ.get("ODOO_USER")
+ODOO_API_KEY    = os.environ.get("ODOO_API_KEY")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -48,6 +54,10 @@ CUANDO SEA SEGUIMIENTO DE PEDIDO, solicita:
 """
 
 
+def limpiar_html(texto: str) -> str:
+    return re.sub(r"<[^>]+>", "", texto).strip()
+
+
 def obtener_respuesta_ia(telefono: str, mensaje_usuario: str) -> str:
     if telefono not in conversaciones:
         conversaciones[telefono] = []
@@ -84,6 +94,56 @@ def enviar_whatsapp(telefono: str, mensaje: str):
     return resp
 
 
+def registrar_en_odoo(telefono: str, mensaje_cliente: str, respuesta_ia: str):
+    """Registra la respuesta de la IA en el hilo de WhatsApp en Odoo."""
+    try:
+        # Autenticación con Odoo
+        common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
+        uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
+
+        if not uid:
+            print("[Odoo] Error de autenticación")
+            return
+
+        models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
+
+        # Buscar el mensaje más reciente del cliente por teléfono
+        mensajes = models.execute_kw(
+            ODOO_DB, uid, ODOO_API_KEY,
+            "whatsapp.message", "search_read",
+            [[["mobile_number", "=", telefono]]],
+            {"fields": ["id", "wa_discuss_channel_id"], "order": "id desc", "limit": 1}
+        )
+
+        if not mensajes:
+            print(f"[Odoo] No se encontró canal para {telefono}")
+            return
+
+        canal_id = mensajes[0].get("wa_discuss_channel_id")
+        if not canal_id:
+            print("[Odoo] No se encontró wa_discuss_channel_id")
+            return
+
+        canal_id = canal_id[0] if isinstance(canal_id, list) else canal_id
+
+        # Registrar la respuesta de la IA como mensaje saliente en Odoo
+        models.execute_kw(
+            ODOO_DB, uid, ODOO_API_KEY,
+            "whatsapp.message", "create",
+            [{
+                "body": respuesta_ia,
+                "message_type": "outbound",
+                "state": "sent",
+                "mobile_number": telefono,
+                "wa_discuss_channel_id": canal_id,
+            }]
+        )
+        print(f"[Odoo] Respuesta registrada en canal {canal_id}")
+
+    except Exception as e:
+        print(f"[Odoo] Error al registrar: {e}")
+
+
 # ─── VERIFICACIÓN DEL WEBHOOK ───
 @app.route("/webhook", methods=["GET"])
 def verificar_webhook():
@@ -106,18 +166,16 @@ def recibir_mensaje():
     telefono = None
     texto    = None
 
-# ── Formato Odoo ──
+    # ── Formato Odoo ──
     if "mobile_number" in data or "display_name" in data:
-        telefono = data.get("mobile_number") or data.get("display_name", "")
+        telefono  = data.get("mobile_number") or data.get("display_name", "")
         texto_raw = data.get("body", "")
-        # Limpiar etiquetas HTML que manda Odoo
-        import re
-        texto = re.sub(r"<[^>]+>", "", texto_raw).strip()
+        texto     = limpiar_html(texto_raw)
 
     # ── Formato Meta directo ──
     elif "entry" in data:
         try:
-            value       = data["entry"][0]["changes"][0]["value"]
+            value = data["entry"][0]["changes"][0]["value"]
             if "messages" not in value:
                 return jsonify({"status": "ok"}), 200
             mensaje_obj = value["messages"][0]
@@ -137,7 +195,12 @@ def recibir_mensaje():
     print(f"[Mensaje] De {telefono}: {texto}")
     respuesta = obtener_respuesta_ia(telefono, texto)
     print(f"[IA] Respuesta: {respuesta}")
+
+    # Enviar por WhatsApp
     enviar_whatsapp(telefono, respuesta)
+
+    # Registrar respuesta en Odoo
+    registrar_en_odoo(telefono, texto, respuesta)
 
     return jsonify({"status": "ok"}), 200
 
