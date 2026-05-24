@@ -106,10 +106,13 @@ def recibir_mensaje():
     telefono = None
     texto    = None
 
-    # ── Formato Odoo ──
-    if "mobile" in data or "body" in data:
-        telefono = data.get("mobile", "")
-        texto    = data.get("body", "")
+# ── Formato Odoo ──
+    if "mobile_number" in data or "display_name" in data:
+        telefono = data.get("mobile_number") or data.get("display_name", "")
+        texto_raw = data.get("body", "")
+        # Limpiar etiquetas HTML que manda Odoo
+        import re
+        texto = re.sub(r"<[^>]+>", "", texto_raw).strip()
 
     # ── Formato Meta directo ──
     elif "entry" in data:
