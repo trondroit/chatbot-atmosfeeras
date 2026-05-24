@@ -1,19 +1,14 @@
 import os
-import json
 import requests
 from flask import Flask, request, jsonify
 from openai import OpenAI
 
 app = Flask(__name__)
 
-# ─────────────────────────────────────────
-#  PON TUS CREDENCIALES AQUÍ
-# ─────────────────────────────────────────
 VERIFY_TOKEN    = os.environ.get("VERIFY_TOKEN")
 WHATSAPP_TOKEN  = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 OPENAI_API_KEY  = os.environ.get("OPENAI_API_KEY")
-# ─────────────────────────────────────────
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -32,7 +27,7 @@ REGLAS:
 - Si no tienes información suficiente, pide los datos necesarios.
 - Si el cliente está molesto, pide disculpas y ofrece pasarlo con un asesor humano.
 
-CUANDO PIDAN COTIZACIÓN, solicita:
+CUANDO PIDAN COTIZACIÓN, solicita uno por uno:
 1. Tipo de proyecto (cocina, closet, sala, etc.)
 2. Medidas aproximadas
 3. Ciudad
@@ -52,40 +47,27 @@ CUANDO SEA SEGUIMIENTO DE PEDIDO, solicita:
 - Motivo del seguimiento
 """
 
+
 def obtener_respuesta_ia(telefono: str, mensaje_usuario: str) -> str:
-    """Consulta a OpenAI manteniendo historial por cliente."""
     if telefono not in conversaciones:
         conversaciones[telefono] = []
 
-    conversaciones[telefono].append({
-        "role": "user",
-        "content": mensaje_usuario
-    })
-
-    # Limitar historial a últimos 10 mensajes para no gastar tokens
+    conversaciones[telefono].append({"role": "user", "content": mensaje_usuario})
     historial = conversaciones[telefono][-10:]
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",  # Económico y rápido, cambia a gpt-4o si quieres más calidad
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT}
-        ] + historial,
+        model="gpt-4o-mini",
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + historial,
         max_tokens=300,
         temperature=0.7
     )
 
     respuesta = response.choices[0].message.content
-
-    conversaciones[telefono].append({
-        "role": "assistant",
-        "content": respuesta
-    })
-
+    conversaciones[telefono].append({"role": "assistant", "content": respuesta})
     return respuesta
 
 
 def enviar_whatsapp(telefono: str, mensaje: str):
-    """Envía un mensaje de texto libre por Meta WhatsApp Cloud API."""
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -102,7 +84,7 @@ def enviar_whatsapp(telefono: str, mensaje: str):
     return resp
 
 
-# ─── VERIFICACIÓN DEL WEBHOOK (Meta lo llama una sola vez al configurar) ───
+# ─── VERIFICACIÓN DEL WEBHOOK ───
 @app.route("/webhook", methods=["GET"])
 def verificar_webhook():
     mode      = request.args.get("hub.mode")
@@ -118,38 +100,41 @@ def verificar_webhook():
 # ─── RECEPCIÓN DE MENSAJES ───
 @app.route("/webhook", methods=["POST"])
 def recibir_mensaje():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    print(f"[Webhook] Datos recibidos: {data}")
 
-    try:
-        entry    = data["entry"][0]
-        changes  = entry["changes"][0]
-        value    = changes["value"]
+    telefono = None
+    texto    = None
 
-        # Ignorar si no hay mensajes (puede ser status update)
-        if "messages" not in value:
+    # ── Formato Odoo ──
+    if "mobile" in data or "body" in data:
+        telefono = data.get("mobile", "")
+        texto    = data.get("body", "")
+
+    # ── Formato Meta directo ──
+    elif "entry" in data:
+        try:
+            value       = data["entry"][0]["changes"][0]["value"]
+            if "messages" not in value:
+                return jsonify({"status": "ok"}), 200
+            mensaje_obj = value["messages"][0]
+            telefono    = mensaje_obj["from"]
+            if mensaje_obj["type"] != "text":
+                enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto. ¿En qué te puedo ayudar?")
+                return jsonify({"status": "ok"}), 200
+            texto = mensaje_obj["text"]["body"]
+        except (KeyError, IndexError) as e:
+            print(f"[Error Meta] {e}")
             return jsonify({"status": "ok"}), 200
 
-        mensaje_obj = value["messages"][0]
-        telefono    = mensaje_obj["from"]          # Número del cliente
-        tipo        = mensaje_obj["type"]
+    if not telefono or not texto:
+        print("[Webhook] Sin teléfono o mensaje, ignorando.")
+        return jsonify({"status": "ok"}), 200
 
-        # Solo procesar mensajes de texto
-        if tipo != "text":
-            enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto. ¿En qué te puedo ayudar?")
-            return jsonify({"status": "ok"}), 200
-
-        texto = mensaje_obj["text"]["body"]
-        print(f"[Mensaje] De {telefono}: {texto}")
-
-        # Obtener respuesta de la IA
-        respuesta = obtener_respuesta_ia(telefono, texto)
-        print(f"[IA] Respuesta: {respuesta}")
-
-        # Enviar respuesta al cliente
-        enviar_whatsapp(telefono, respuesta)
-
-    except (KeyError, IndexError) as e:
-        print(f"[Error] Estructura inesperada: {e} | Data: {data}")
+    print(f"[Mensaje] De {telefono}: {texto}")
+    respuesta = obtener_respuesta_ia(telefono, texto)
+    print(f"[IA] Respuesta: {respuesta}")
+    enviar_whatsapp(telefono, respuesta)
 
     return jsonify({"status": "ok"}), 200
 
