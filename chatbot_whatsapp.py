@@ -20,6 +20,12 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 conversaciones = {}
 
+# Números pausados — el bot no responde a estos
+numeros_pausados = set()
+
+FRASE_PAUSA     = "un asesor te atenderá"
+FRASE_REANUDAR  = "gracias por comunicarce a atmosferas"
+
 SYSTEM_PROMPT = """
 Eres el asistente virtual de Atmósferas por WhatsApp.
 
@@ -74,7 +80,7 @@ REGLAS IMPORTANTES:
 - No actúes solo como ecommerce. Actúa como asesor que ayuda a encontrar la mejor solución.
 - NUNCA prometas stock, tiempos exactos, descuentos, instalación o envío gratis sin validación. Siempre di: "Lo confirmamos con el equipo comercial según producto, cantidad, color, ciudad y fecha requerida."
 - Si el cliente pide cotización, solicita uno por uno: tipo de proyecto, espacio, medidas aproximadas, uso, ciudad, estilo, material preferido, presupuesto estimado, cantidad y fecha requerida.
-- Si pregunta por servicios, explica los 4 grandes áreas: exterior, interior/contract, sombra y acabados arquitectónicos.
+- Si pregunta por servicios, explica las 4 grandes áreas: exterior, interior/contract, sombra y acabados arquitectónicos.
 - Si es arquitecto, interiorista, hotelero o desarrollador, preséntale el Programa de Profesionales y sus beneficios.
 - Si quiere registrarse al programa, solicita los datos de registro uno por uno.
 - Si es seguimiento de pedido, solicita: nombre completo, número de pedido o proyecto y motivo del seguimiento.
@@ -200,7 +206,36 @@ def verificar_webhook():
     return "Token inválido", 403
 
 
-# ─── RECEPCIÓN DE MENSAJES ───
+# ─── WEBHOOK SALIENTE DESDE ODOO (mensajes que mandan los asesores) ───
+@app.route("/webhook-saliente", methods=["POST"])
+def recibir_mensaje_saliente():
+    """
+    Odoo llama a este endpoint cuando un asesor manda un mensaje.
+    Si contiene la frase de pausa → pausa el bot para ese número.
+    Si contiene la frase de reanudar → reactiva el bot.
+    """
+    data = request.get_json(silent=True) or {}
+    print(f"[Saliente] Datos recibidos: {data}")
+
+    telefono  = data.get("mobile_number") or data.get("display_name", "")
+    texto_raw = data.get("body", "")
+    texto     = limpiar_html(texto_raw).lower().strip()
+
+    if not telefono or not texto:
+        return jsonify({"status": "ok"}), 200
+
+    if FRASE_PAUSA.lower() in texto:
+        numeros_pausados.add(telefono)
+        print(f"[Bot] PAUSADO para {telefono}")
+
+    elif FRASE_REANUDAR.lower() in texto:
+        numeros_pausados.discard(telefono)
+        print(f"[Bot] REACTIVADO para {telefono}")
+
+    return jsonify({"status": "ok"}), 200
+
+
+# ─── RECEPCIÓN DE MENSAJES ENTRANTES ───
 @app.route("/webhook", methods=["POST"])
 def recibir_mensaje():
     data = request.get_json(silent=True) or {}
@@ -236,6 +271,11 @@ def recibir_mensaje():
 
     if not telefono or not texto:
         print("[Webhook] Sin teléfono o mensaje, ignorando.")
+        return jsonify({"status": "ok"}), 200
+
+    # ── Verificar si el bot está pausado para este número ──
+    if telefono in numeros_pausados:
+        print(f"[Bot] Pausado para {telefono}, ignorando mensaje.")
         return jsonify({"status": "ok"}), 200
 
     print(f"[Mensaje] De {telefono}: {texto}")
