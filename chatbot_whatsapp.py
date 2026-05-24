@@ -93,8 +93,8 @@ def enviar_whatsapp(telefono: str, mensaje: str):
     return resp
 
 
-def registrar_en_odoo(telefono: str, respuesta_ia: str):
-    """Registra la respuesta de la IA en Odoo."""
+def registrar_en_odoo(telefono: str, respuesta_ia: str, wa_account_id: int):
+    """Registra la respuesta de la IA como mensaje saliente en Odoo."""
     try:
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
@@ -105,30 +105,21 @@ def registrar_en_odoo(telefono: str, respuesta_ia: str):
 
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
-        # Primero exploramos los campos disponibles en whatsapp.message
-        campos = models.execute_kw(
+        nuevo_id = models.execute_kw(
             ODOO_DB, uid, ODOO_API_KEY,
-            "whatsapp.message", "fields_get",
-            [],
-            {"attributes": ["string", "type"]}
+            "whatsapp.message", "create",
+            [{
+                "mobile_number": telefono,
+                "body": respuesta_ia,
+                "message_type": "outbound",
+                "state": "sent",
+                "wa_account_id": wa_account_id,
+            }]
         )
-        print(f"[Odoo] Campos disponibles: {list(campos.keys())}")
-
-        # Buscar mensaje reciente del cliente
-        mensajes = models.execute_kw(
-            ODOO_DB, uid, ODOO_API_KEY,
-            "whatsapp.message", "search_read",
-            [[["mobile_number", "=", telefono]]],
-            {"fields": list(campos.keys()), "order": "id desc", "limit": 1}
-        )
-
-        if mensajes:
-            print(f"[Odoo] Mensaje encontrado: {mensajes[0]}")
-        else:
-            print(f"[Odoo] No se encontró mensaje para {telefono}")
+        print(f"[Odoo] Mensaje registrado con ID {nuevo_id}")
 
     except Exception as e:
-        print(f"[Odoo] Error: {e}")
+        print(f"[Odoo] Error al registrar: {e}")
 
 
 # ─── VERIFICACIÓN DEL WEBHOOK ───
@@ -150,8 +141,9 @@ def recibir_mensaje():
     data = request.get_json(silent=True) or {}
     print(f"[Webhook] Datos recibidos: {data}")
 
-    telefono = None
-    texto    = None
+    telefono     = None
+    texto        = None
+    wa_account_id = 3  # ID de cuenta Atmosferas según los logs
 
     # ── Formato Odoo ──
     if "mobile_number" in data or "display_name" in data:
@@ -184,7 +176,7 @@ def recibir_mensaje():
     print(f"[IA] Respuesta: {respuesta}")
 
     enviar_whatsapp(telefono, respuesta)
-    registrar_en_odoo(telefono, respuesta)
+    registrar_en_odoo(telefono, respuesta, wa_account_id)
 
     return jsonify({"status": "ok"}), 200
 
