@@ -93,8 +93,8 @@ def enviar_whatsapp(telefono: str, mensaje: str):
     return resp
 
 
-def registrar_en_odoo(telefono: str, respuesta_ia: str, wa_account_id: int):
-    """Registra la respuesta de la IA como mensaje saliente en Odoo."""
+def registrar_en_odoo(telefono: str, respuesta_ia: str, odoo_message_id: int, wa_account_id: int):
+    """Registra la respuesta de la IA en el hilo correcto de Odoo."""
     try:
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
@@ -105,18 +105,61 @@ def registrar_en_odoo(telefono: str, respuesta_ia: str, wa_account_id: int):
 
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
-        nuevo_id = models.execute_kw(
+        # Buscar el mail_message_id del mensaje entrante para vincularnos al mismo hilo
+        mensaje_original = models.execute_kw(
             ODOO_DB, uid, ODOO_API_KEY,
-            "whatsapp.message", "create",
-            [{
-                "mobile_number": telefono,
-                "body": respuesta_ia,
-                "message_type": "outbound",
-                "state": "sent",
-                "wa_account_id": wa_account_id,
-            }]
+            "whatsapp.message", "read",
+            [[odoo_message_id]],
+            {"fields": ["mail_message_id", "wa_account_id"]}
         )
-        print(f"[Odoo] Mensaje registrado con ID {nuevo_id}")
+
+        if not mensaje_original:
+            print("[Odoo] No se encontró el mensaje original")
+            return
+
+        mail_message_id = mensaje_original[0].get("mail_message_id")
+        mail_message_id = mail_message_id[0] if isinstance(mail_message_id, list) else mail_message_id
+        print(f"[Odoo] mail_message_id del hilo: {mail_message_id}")
+
+        # Buscar el discuss.channel vinculado a ese mail.message
+        canal = models.execute_kw(
+            ODOO_DB, uid, ODOO_API_KEY,
+            "mail.message", "read",
+            [[mail_message_id]],
+            {"fields": ["res_id", "model"]}
+        )
+        print(f"[Odoo] Canal info: {canal}")
+
+        if canal and canal[0].get("model") == "discuss.channel":
+            channel_id = canal[0].get("res_id")
+
+            # Postear mensaje en el canal de discuss
+            models.execute_kw(
+                ODOO_DB, uid, ODOO_API_KEY,
+                "discuss.channel", "message_post",
+                [channel_id],
+                {
+                    "body": respuesta_ia,
+                    "message_type": "comment",
+                    "author_id": uid,
+                }
+            )
+            print(f"[Odoo] Respuesta posteada en discuss.channel {channel_id}")
+        else:
+            # Fallback: crear whatsapp.message saliente vinculado al mismo número
+            nuevo_id = models.execute_kw(
+                ODOO_DB, uid, ODOO_API_KEY,
+                "whatsapp.message", "create",
+                [{
+                    "mobile_number": telefono,
+                    "body": respuesta_ia,
+                    "message_type": "outbound",
+                    "state": "sent",
+                    "wa_account_id": wa_account_id,
+                    "parent_id": odoo_message_id,
+                }]
+            )
+            print(f"[Odoo] Mensaje creado con parent_id, ID: {nuevo_id}")
 
     except Exception as e:
         print(f"[Odoo] Error al registrar: {e}")
@@ -141,15 +184,17 @@ def recibir_mensaje():
     data = request.get_json(silent=True) or {}
     print(f"[Webhook] Datos recibidos: {data}")
 
-    telefono     = None
-    texto        = None
-    wa_account_id = 3  # ID de cuenta Atmosferas según los logs
+    telefono      = None
+    texto         = None
+    odoo_msg_id   = None
+    wa_account_id = 3  # ID cuenta Atmosferas
 
     # ── Formato Odoo ──
     if "mobile_number" in data or "display_name" in data:
-        telefono  = data.get("mobile_number") or data.get("display_name", "")
-        texto_raw = data.get("body", "")
-        texto     = limpiar_html(texto_raw)
+        telefono    = data.get("mobile_number") or data.get("display_name", "")
+        texto_raw   = data.get("body", "")
+        texto       = limpiar_html(texto_raw)
+        odoo_msg_id = data.get("id")
 
     # ── Formato Meta directo ──
     elif "entry" in data:
@@ -176,7 +221,9 @@ def recibir_mensaje():
     print(f"[IA] Respuesta: {respuesta}")
 
     enviar_whatsapp(telefono, respuesta)
-    registrar_en_odoo(telefono, respuesta, wa_account_id)
+
+    if odoo_msg_id:
+        registrar_en_odoo(telefono, respuesta, odoo_msg_id, wa_account_id)
 
     return jsonify({"status": "ok"}), 200
 
