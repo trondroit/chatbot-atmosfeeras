@@ -26,6 +26,17 @@ FRASE_REANUDAR = "gracias por comunicarce a atmosferas"
 
 PAUSADOS_FILE = "/tmp/pausados.json"
 
+MENSAJE_BIENVENIDA = """¡Hola! 👋 Gracias por comunicarte con Atmosferas Muebles. Mi nombre es Anabel y con gusto te apoyaré.
+
+Estamos para ayudarte a encontrar el mueble ideal para tu hogar u oficina.
+
+Para brindarte una mejor atención, cuéntame por favor:
+🔹 ¿Qué producto o modelo te interesa?
+🔹 ¿Qué color o estilo buscas?
+🔹 ¿En qué ciudad te encuentras?
+
+Con gusto te confirmo precios, disponibilidad y tiempos de entrega 😊"""
+
 def cargar_pausados():
     try:
         with open(PAUSADOS_FILE, "r") as f:
@@ -43,7 +54,9 @@ def guardar_pausados(pausados):
 numeros_pausados = cargar_pausados()
 
 SYSTEM_PROMPT = """
-Eres el asistente virtual de Atmósferas por WhatsApp.
+Eres Anabel, asistente virtual de Atmósferas Muebles por WhatsApp.
+
+Tu personalidad es cálida, amable, profesional y cercana. Usas emojis con moderación para dar un tono humano y amigable. Siempre te presentas como Anabel, nunca como ChatGPT ni como un bot.
 
 Atmósferas no es solo una tienda de muebles. Es un aliado en soluciones para proyectos de arquitectura, interiorismo, hotelería, restaurantería y desarrollo. Su valor principal está en integrar marcas, productos, especificaciones, asesoría, disponibilidad y ejecución para facilitar el proyecto.
 
@@ -87,26 +100,30 @@ DESCUENTOS POR VOLUMEN ANUAL:
 - $850,001 en adelante: usuario final 20%, profesional 25%
 
 DATOS PARA REGISTRO AL PROGRAMA DE PROFESIONALES:
-Nombre completo, empresa o firma, correo electrónico, teléfono, RFC, ciudad y estado, giro profesional, página web o portafolio y comentarios adicionales. El equipo valida el perfil y contacta al solicitante.
+Nombre completo, empresa o firma, correo electrónico, teléfono, RFC, ciudad y estado, giro profesional, página web o portafolio y comentarios adicionales.
 
-REGLAS IMPORTANTES:
+TONO Y ESTILO:
 - Responde siempre en español.
-- Sé breve, amable y profesional. Máximo 3-4 oraciones por mensaje.
-- No digas que eres ChatGPT; eres el asistente de Atmósferas.
-- No actúes solo como ecommerce. Actúa como asesor que ayuda a encontrar la mejor solución.
-- NUNCA prometas stock, tiempos exactos, descuentos, instalación o envío gratis sin validación. Siempre di: "Lo confirmamos con el equipo comercial según producto, cantidad, color, ciudad y fecha requerida."
+- Sé breve, cálida y profesional. Máximo 4-5 oraciones por mensaje.
+- Usa emojis con moderación: 🔹✅😊👋 para dar calidez sin exagerar.
+- Habla en primera persona como Anabel: "Con gusto te ayudo", "Te confirmo", "Me alegra que preguntes".
+- No uses frases robóticas. Suena humana y cercana.
+- NUNCA prometas stock, tiempos exactos, descuentos o envío gratis sin validación. Di: "Con gusto lo confirmo con nuestro equipo para darte información exacta 😊"
 - Si el cliente pide cotización, solicita uno por uno: tipo de proyecto, espacio, medidas aproximadas, uso, ciudad, estilo, material preferido, presupuesto estimado, cantidad y fecha requerida.
-- Si pregunta por servicios, explica las 4 grandes áreas: exterior, interior/contract, sombra y acabados arquitectónicos.
-- Si es arquitecto, interiorista, hotelero o desarrollador, preséntale el Programa de Profesionales y sus beneficios.
-- Si quiere registrarse al programa, solicita los datos de registro uno por uno.
+- Si es arquitecto, interiorista, hotelero o desarrollador, preséntale el Programa de Profesionales con entusiasmo.
+- Si quiere registrarse al programa, solicita los datos uno por uno con amabilidad.
 - Si es seguimiento de pedido, solicita: nombre completo, número de pedido o proyecto y motivo del seguimiento.
-- Si el cliente está molesto, pide disculpas y ofrece pasarlo con un asesor humano.
-- Cuando un usuario pregunte por productos, primero identifica si busca exterior, interior, sombra, acabados arquitectónicos o desarrollo personalizado.
+- Si el cliente está molesto, pide disculpas con empatía y ofrece pasarlo con un asesor.
+- Cuando pregunten por productos, primero identifica si busca exterior, interior, sombra, acabados arquitectónicos o desarrollo personalizado.
 """
 
 
 def limpiar_html(texto: str) -> str:
     return re.sub(r"<[^>]+>", "", texto).strip()
+
+
+def es_primer_mensaje(telefono: str) -> bool:
+    return telefono not in conversaciones or len(conversaciones[telefono]) == 0
 
 
 def obtener_respuesta_ia(telefono: str, mensaje_usuario: str) -> str:
@@ -208,24 +225,19 @@ def verificar_webhook():
 def recibir_mensaje_saliente():
     data = request.get_json(silent=True) or {}
     print(f"[Saliente] Datos: {data}")
-
     telefono  = data.get("mobile_number") or data.get("display_name", "")
     texto_raw = data.get("body", "")
     texto     = limpiar_html(texto_raw).lower().strip()
-
     if not telefono or not texto:
         return jsonify({"status": "ok"}), 200
-
     if FRASE_PAUSA.lower() in texto:
         numeros_pausados.add(telefono)
         guardar_pausados(numeros_pausados)
         print(f"[Bot] PAUSADO para {telefono}")
-
     elif FRASE_REANUDAR.lower() in texto:
         numeros_pausados.discard(telefono)
         guardar_pausados(numeros_pausados)
         print(f"[Bot] REACTIVADO para {telefono}")
-
     return jsonify({"status": "ok"}), 200
 
 
@@ -245,7 +257,6 @@ def recibir_mensaje():
         texto_raw   = data.get("body", "")
         texto       = limpiar_html(texto_raw)
         odoo_msg_id = data.get("id")
-
     elif "entry" in data:
         try:
             value = data["entry"][0]["changes"][0]["value"]
@@ -254,7 +265,7 @@ def recibir_mensaje():
             mensaje_obj = value["messages"][0]
             telefono    = mensaje_obj["from"]
             if mensaje_obj["type"] != "text":
-                enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto.")
+                enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto. ¿En qué te puedo ayudar? 😊")
                 return jsonify({"status": "ok"}), 200
             texto = mensaje_obj["text"]["body"]
         except (KeyError, IndexError) as e:
@@ -269,14 +280,29 @@ def recibir_mensaje():
         print(f"[Bot] Pausado para {telefono}, ignorando.")
         return jsonify({"status": "ok"}), 200
 
+    # Mensaje de bienvenida al primer contacto
+    primer_mensaje = es_primer_mensaje(telefono)
+
     print(f"[Mensaje] De {telefono}: {texto}")
+
+    if primer_mensaje:
+        enviar_whatsapp(telefono, MENSAJE_BIENVENIDA)
+        if odoo_msg_id:
+            registrar_en_odoo(telefono, MENSAJE_BIENVENIDA, odoo_msg_id, wa_account_id)
+        # Inicializar conversación con contexto del primer mensaje
+        conversaciones[telefono] = []
+
     respuesta = obtener_respuesta_ia(telefono, texto)
     print(f"[IA] Respuesta: {respuesta}")
 
-    enviar_whatsapp(telefono, respuesta)
-
-    if odoo_msg_id:
-        registrar_en_odoo(telefono, respuesta, odoo_msg_id, wa_account_id)
+    # Si es primer mensaje, ya mandamos bienvenida, ahora mandamos también la respuesta
+    if not primer_mensaje:
+        enviar_whatsapp(telefono, respuesta)
+        if odoo_msg_id:
+            registrar_en_odoo(telefono, respuesta, odoo_msg_id, wa_account_id)
+    else:
+        # En el primer mensaje solo mandamos la bienvenida
+        pass
 
     return jsonify({"status": "ok"}), 200
 
