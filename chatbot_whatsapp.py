@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import requests
 import xmlrpc.client
 from flask import Flask, request, jsonify
@@ -20,11 +21,26 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 conversaciones = {}
 
-# Números pausados — el bot no responde a estos
-numeros_pausados = set()
+FRASE_PAUSA    = "un asesor te atenderá"
+FRASE_REANUDAR = "gracias por comunicarce a atmosferas"
 
-FRASE_PAUSA     = "un asesor te atenderá"
-FRASE_REANUDAR  = "gracias por comunicarce a atmosferas"
+PAUSADOS_FILE = "/tmp/pausados.json"
+
+def cargar_pausados():
+    try:
+        with open(PAUSADOS_FILE, "r") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+def guardar_pausados(pausados):
+    try:
+        with open(PAUSADOS_FILE, "w") as f:
+            json.dump(list(pausados), f)
+    except Exception as e:
+        print(f"[Pausados] Error guardando: {e}")
+
+numeros_pausados = cargar_pausados()
 
 SYSTEM_PROMPT = """
 Eres el asistente virtual de Atmósferas por WhatsApp.
@@ -96,17 +112,14 @@ def limpiar_html(texto: str) -> str:
 def obtener_respuesta_ia(telefono: str, mensaje_usuario: str) -> str:
     if telefono not in conversaciones:
         conversaciones[telefono] = []
-
     conversaciones[telefono].append({"role": "user", "content": mensaje_usuario})
     historial = conversaciones[telefono][-10:]
-
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "system", "content": SYSTEM_PROMPT}] + historial,
         max_tokens=400,
         temperature=0.7
     )
-
     respuesta = response.choices[0].message.content
     conversaciones[telefono].append({"role": "assistant", "content": respuesta})
     return respuesta
@@ -125,7 +138,7 @@ def enviar_whatsapp(telefono: str, mensaje: str):
         "text": {"body": mensaje}
     }
     resp = requests.post(url, headers=headers, json=body)
-    print(f"[WhatsApp] Enviado a {telefono}: {resp.status_code} - {resp.text}")
+    print(f"[WhatsApp] Enviado a {telefono}: {resp.status_code}")
     return resp
 
 
@@ -133,49 +146,37 @@ def registrar_en_odoo(telefono: str, respuesta_ia: str, odoo_message_id: int, wa
     try:
         common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
         uid = common.authenticate(ODOO_DB, ODOO_USER, ODOO_API_KEY, {})
-
         if not uid:
             print("[Odoo] Error de autenticación")
             return
-
         models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
-
         mensaje_original = models.execute_kw(
             ODOO_DB, uid, ODOO_API_KEY,
             "whatsapp.message", "read",
             [[odoo_message_id]],
             {"fields": ["mail_message_id", "wa_account_id"]}
         )
-
         if not mensaje_original:
-            print("[Odoo] No se encontró el mensaje original")
             return
-
         mail_message_id = mensaje_original[0].get("mail_message_id")
         mail_message_id = mail_message_id[0] if isinstance(mail_message_id, list) else mail_message_id
-
         canal = models.execute_kw(
             ODOO_DB, uid, ODOO_API_KEY,
             "mail.message", "read",
             [[mail_message_id]],
             {"fields": ["res_id", "model"]}
         )
-
         if canal and canal[0].get("model") == "discuss.channel":
             channel_id = canal[0].get("res_id")
             models.execute_kw(
                 ODOO_DB, uid, ODOO_API_KEY,
                 "discuss.channel", "message_post",
                 [channel_id],
-                {
-                    "body": respuesta_ia,
-                    "message_type": "comment",
-                    "author_id": uid,
-                }
+                {"body": respuesta_ia, "message_type": "comment", "author_id": uid}
             )
-            print(f"[Odoo] Respuesta posteada en discuss.channel {channel_id}")
+            print(f"[Odoo] Respuesta posteada en canal {channel_id}")
         else:
-            nuevo_id = models.execute_kw(
+            models.execute_kw(
                 ODOO_DB, uid, ODOO_API_KEY,
                 "whatsapp.message", "create",
                 [{
@@ -187,35 +188,26 @@ def registrar_en_odoo(telefono: str, respuesta_ia: str, odoo_message_id: int, wa
                     "parent_id": odoo_message_id,
                 }]
             )
-            print(f"[Odoo] Mensaje creado con ID: {nuevo_id}")
-
     except Exception as e:
-        print(f"[Odoo] Error al registrar: {e}")
+        print(f"[Odoo] Error: {e}")
 
 
-# ─── VERIFICACIÓN DEL WEBHOOK ───
+# ─── VERIFICACIÓN ───
 @app.route("/webhook", methods=["GET"])
 def verificar_webhook():
     mode      = request.args.get("hub.mode")
     token     = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-
     if mode == "subscribe" and token == VERIFY_TOKEN:
-        print("[Webhook] Verificado correctamente")
         return challenge, 200
     return "Token inválido", 403
 
 
-# ─── WEBHOOK SALIENTE DESDE ODOO (mensajes que mandan los asesores) ───
+# ─── WEBHOOK SALIENTE (mensajes de asesores desde Odoo) ───
 @app.route("/webhook-saliente", methods=["POST"])
 def recibir_mensaje_saliente():
-    """
-    Odoo llama a este endpoint cuando un asesor manda un mensaje.
-    Si contiene la frase de pausa → pausa el bot para ese número.
-    Si contiene la frase de reanudar → reactiva el bot.
-    """
     data = request.get_json(silent=True) or {}
-    print(f"[Saliente] Datos recibidos: {data}")
+    print(f"[Saliente] Datos: {data}")
 
     telefono  = data.get("mobile_number") or data.get("display_name", "")
     texto_raw = data.get("body", "")
@@ -226,34 +218,34 @@ def recibir_mensaje_saliente():
 
     if FRASE_PAUSA.lower() in texto:
         numeros_pausados.add(telefono)
+        guardar_pausados(numeros_pausados)
         print(f"[Bot] PAUSADO para {telefono}")
 
     elif FRASE_REANUDAR.lower() in texto:
         numeros_pausados.discard(telefono)
+        guardar_pausados(numeros_pausados)
         print(f"[Bot] REACTIVADO para {telefono}")
 
     return jsonify({"status": "ok"}), 200
 
 
-# ─── RECEPCIÓN DE MENSAJES ENTRANTES ───
+# ─── MENSAJES ENTRANTES ───
 @app.route("/webhook", methods=["POST"])
 def recibir_mensaje():
     data = request.get_json(silent=True) or {}
-    print(f"[Webhook] Datos recibidos: {data}")
+    print(f"[Webhook] Datos: {data}")
 
     telefono      = None
     texto         = None
     odoo_msg_id   = None
     wa_account_id = 3
 
-    # ── Formato Odoo ──
     if "mobile_number" in data or "display_name" in data:
         telefono    = data.get("mobile_number") or data.get("display_name", "")
         texto_raw   = data.get("body", "")
         texto       = limpiar_html(texto_raw)
         odoo_msg_id = data.get("id")
 
-    # ── Formato Meta directo ──
     elif "entry" in data:
         try:
             value = data["entry"][0]["changes"][0]["value"]
@@ -262,7 +254,7 @@ def recibir_mensaje():
             mensaje_obj = value["messages"][0]
             telefono    = mensaje_obj["from"]
             if mensaje_obj["type"] != "text":
-                enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto. ¿En qué te puedo ayudar?")
+                enviar_whatsapp(telefono, "Por el momento solo puedo leer mensajes de texto.")
                 return jsonify({"status": "ok"}), 200
             texto = mensaje_obj["text"]["body"]
         except (KeyError, IndexError) as e:
@@ -273,9 +265,8 @@ def recibir_mensaje():
         print("[Webhook] Sin teléfono o mensaje, ignorando.")
         return jsonify({"status": "ok"}), 200
 
-    # ── Verificar si el bot está pausado para este número ──
     if telefono in numeros_pausados:
-        print(f"[Bot] Pausado para {telefono}, ignorando mensaje.")
+        print(f"[Bot] Pausado para {telefono}, ignorando.")
         return jsonify({"status": "ok"}), 200
 
     print(f"[Mensaje] De {telefono}: {texto}")
