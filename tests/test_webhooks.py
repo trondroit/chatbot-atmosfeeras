@@ -1,5 +1,6 @@
 import json
 
+import app as app_module
 from conftest import firmar, payload_meta_texto, post_meta
 
 
@@ -119,6 +120,26 @@ def test_comandos_bot_off_on(entorno):
     assert enviados == []
     _post_saliente(client, tel, "#bot-on")
     post_meta(client, payload_meta_texto(telefono=tel, msg_id="wamid.c2"))
+    assert len(enviados) == 1
+
+
+def test_cliente_pide_asesor_pausa_el_bot(entorno, monkeypatch):
+    client, enviados = entorno
+    tel = "5215550009999"
+    # Simula que la IA detecta que el cliente quiere un humano.
+    monkeypatch.setattr(app_module.ai, "responder",
+                        lambda t, txt, *a, **k: (None, True))
+
+    post_meta(client, payload_meta_texto(telefono=tel, texto="quiero un asesor",
+                                         msg_id="wamid.h1"))
+    # Se le confirma al cliente una sola vez con el mensaje de paso a asesor.
+    assert enviados == [(tel, app_module.MENSAJE_PASO_ASESOR)]
+
+    # Y a partir de ahí el bot queda pausado para ese número.
+    monkeypatch.setattr(app_module.ai, "responder",
+                        lambda t, txt, *a, **k: ("no debería enviarse", False))
+    post_meta(client, payload_meta_texto(telefono=tel, texto="hola de nuevo",
+                                         msg_id="wamid.h2"))
     assert len(enviados) == 1
 
 
