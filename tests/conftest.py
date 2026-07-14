@@ -66,7 +66,7 @@ def entorno(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module.whatsapp_api, "marcar_leido",
                         lambda mid: None)
     monkeypatch.setattr(app_module.ai, "responder",
-                        lambda tel, txt, *a, **k: f"eco:{txt}")
+                        lambda tel, txt, *a, **k: (f"eco:{txt}", False))
     monkeypatch.setattr(app_module.odoo_client, "registrar_respuesta",
                         lambda *a, **k: None)
     monkeypatch.setattr(app_module, "_lanzar", lambda f, *args: f(*args))

@@ -50,6 +50,10 @@ MENSAJE_AUDIO_FALLIDO = (
     "No pude escuchar bien su nota de voz 😔 "
     "¿Me lo puede compartir por texto, por favor?"
 )
+MENSAJE_PASO_ASESOR = (
+    "¡Con mucho gusto! 🙏 En un momento un asesor de Atmósferas continúa su "
+    "atención por este mismo chat. Gracias por su preferencia."
+)
 
 
 def limpiar_html(texto):
@@ -162,7 +166,11 @@ def _procesar_mensaje_meta(mensaje):
         return
 
     log.info("Mensaje %s de %s", tipo, _mask(telefono))
-    respuesta = ai.responder(telefono, texto or "", imagen_b64, imagen_mime)
+    respuesta, quiere_asesor = ai.responder(telefono, texto or "",
+                                            imagen_b64, imagen_mime)
+    if quiere_asesor:
+        _pasar_a_asesor(telefono)
+        return
     whatsapp_api.enviar_mensaje(telefono, respuesta)
     _quizas_crear_lead(telefono, respuesta)
 
@@ -172,11 +180,22 @@ def _procesar_mensaje_odoo(telefono, texto, odoo_msg_id):
         log.info("Bot pausado para %s, ignorando", _mask(telefono))
         return
     log.info("Mensaje (vía Odoo) de %s", _mask(telefono))
-    respuesta = ai.responder(telefono, texto)
+    respuesta, quiere_asesor = ai.responder(telefono, texto)
+    if quiere_asesor:
+        _pasar_a_asesor(telefono)
+        return
     whatsapp_api.enviar_mensaje(telefono, respuesta)
     if odoo_msg_id:
         odoo_client.registrar_respuesta(telefono, respuesta, odoo_msg_id)
     _quizas_crear_lead(telefono, respuesta)
+
+
+def _pasar_a_asesor(telefono):
+    """El cliente pidió un asesor humano: se pausa el bot para ese número y se
+    le confirma. Un asesor reactiva el bot luego con la frase o #bot-on."""
+    storage.pausar(telefono)
+    whatsapp_api.enviar_mensaje(telefono, MENSAJE_PASO_ASESOR)
+    log.info("Bot AUTO-PAUSADO: %s pidió pasar con un asesor", _mask(telefono))
 
 
 # ─── RUTAS ───

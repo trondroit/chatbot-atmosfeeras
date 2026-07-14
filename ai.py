@@ -16,6 +16,10 @@ MENSAJE_FALLBACK = (
     "En breve un asesor de Atmósferas le atenderá personalmente 🙏"
 )
 
+# El modelo responde solo con este marcador cuando el cliente quiere pasar
+# con un asesor humano (ver prompts.py). Nunca se le muestra al cliente.
+MARCADOR_ASESOR = "[PASAR_A_ASESOR]"
+
 _client = None
 
 
@@ -32,6 +36,11 @@ def _cliente():
 
 def responder(telefono, texto, imagen_b64=None, imagen_mime=None):
     """Genera la respuesta del asesor virtual para un mensaje del cliente.
+
+    Devuelve una tupla (respuesta, quiere_asesor):
+    - respuesta: el texto a enviar al cliente (None si pidió un asesor).
+    - quiere_asesor: True si el cliente pidió pasar con un asesor humano; en
+      ese caso quien llama debe pausar el bot y confirmarle al cliente.
 
     Si hay imagen, se envía al modelo solo en esta llamada; en el historial
     se guarda una nota de texto para no arrastrar la imagen en cada turno.
@@ -66,11 +75,20 @@ def responder(telefono, texto, imagen_b64=None, imagen_mime=None):
         respuesta = response.choices[0].message.content
     except Exception as e:
         log.error("Error consultando OpenAI: %s", e)
-        return MENSAJE_FALLBACK
+        return MENSAJE_FALLBACK, False
 
     storage.agregar_mensaje(telefono, "user", texto_historial)
+
+    if MARCADOR_ASESOR in respuesta:
+        # El cliente pidió un humano: no se le manda el marcador ni una
+        # respuesta de IA; quien llama se encarga de pausar y confirmar.
+        storage.agregar_mensaje(
+            telefono, "assistant", "[El cliente solicitó pasar con un asesor]"
+        )
+        return None, True
+
     storage.agregar_mensaje(telefono, "assistant", respuesta)
-    return respuesta
+    return respuesta, False
 
 
 def transcribir(audio_bytes, mime="audio/ogg"):

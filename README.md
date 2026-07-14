@@ -93,6 +93,11 @@ El comando anterior `gunicorn chatbot_whatsapp:app` sigue funcionando
   acepta también la variante histórica «comunicarce»). También funcionan los
   comandos `#bot-off` y `#bot-on`. Las comparaciones ignoran mayúsculas y
   acentos.
+- **El cliente pide un asesor**: cuando el cliente expresa que quiere hablar
+  con una persona (el modelo lo detecta y responde con el marcador interno
+  `[PASAR_A_ASESOR]`), el bot se **pausa solo** para ese número y le confirma
+  al cliente que un asesor le atenderá. El equipo ve la conversación en Odoo
+  y la toma; luego reactiva el bot con la frase de siempre o con `#bot-on`.
 - **Leads**: con `ODOO_CREAR_LEADS=1`, cuando el bot ofrece canalizar con un
   asesor se crea automáticamente un lead en el CRM de Odoo con el resumen de
   la conversación.
