@@ -6,6 +6,7 @@ os.environ["VERIFY_TOKEN"] = "test-verify"
 os.environ["META_APP_SECRET"] = "secreto-test"
 os.environ["WEBHOOK_SALIENTE_TOKEN"] = "token-odoo"
 os.environ["OPENAI_API_KEY"] = "sk-test"
+os.environ["PAGE_ACCESS_TOKEN"] = "page-token-test"
 os.environ.pop("REDIS_URL", None)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -52,6 +53,24 @@ def payload_meta_texto(telefono="5215550001111", texto="hola", msg_id="wamid.1")
     }
 
 
+def payload_messenger_texto(psid="PSID123", texto="hola", mid="m.1", echo=False,
+                            app_id=None):
+    mensaje = {"mid": mid}
+    if echo:
+        mensaje["is_echo"] = True
+        if app_id:
+            mensaje["app_id"] = app_id
+    mensaje["text"] = texto
+    evento = {"message": mensaje}
+    if echo:
+        evento["sender"] = {"id": "PAGE"}
+        evento["recipient"] = {"id": psid}
+    else:
+        evento["sender"] = {"id": psid}
+        evento["recipient"] = {"id": "PAGE"}
+    return {"object": "page", "entry": [{"messaging": [evento]}]}
+
+
 @pytest.fixture
 def entorno(tmp_path, monkeypatch):
     """Cliente de pruebas con almacenamiento limpio, IA y WhatsApp simulados,
@@ -65,6 +84,10 @@ def entorno(tmp_path, monkeypatch):
                         lambda tel, txt: enviados.append((tel, txt)) or True)
     monkeypatch.setattr(app_module.whatsapp_api, "marcar_leido",
                         lambda mid: None)
+    monkeypatch.setattr(app_module.messenger_api, "enviar_mensaje",
+                        lambda psid, txt: enviados.append((psid, txt)) or True)
+    monkeypatch.setattr(app_module.messenger_api, "marcar_visto",
+                        lambda psid, escribiendo=True: None)
     monkeypatch.setattr(app_module.ai, "responder",
                         lambda tel, txt, *a, **k: (f"eco:{txt}", False))
     monkeypatch.setattr(app_module.odoo_client, "registrar_respuesta",

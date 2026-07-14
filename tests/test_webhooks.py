@@ -1,7 +1,8 @@
 import json
 
 import app as app_module
-from conftest import firmar, payload_meta_texto, post_meta
+from conftest import (firmar, payload_messenger_texto, payload_meta_texto,
+                      post_meta)
 
 
 # ─── Verificación del webhook (GET) ───
@@ -149,6 +150,69 @@ def test_webhook_saliente_sin_token_se_rechaza(entorno):
                        json={"mobile_number": "5215550001111",
                              "body": "un asesor te atenderá"})
     assert resp.status_code == 403
+
+
+# ─── Facebook Messenger ───
+
+def test_messenger_texto_se_responde(entorno):
+    client, enviados = entorno
+    resp = post_meta(client, payload_messenger_texto(texto="hola bot"))
+    assert resp.status_code == 200
+    assert enviados == [("PSID123", "eco:hola bot")]
+
+
+def test_messenger_sin_firma_se_rechaza(entorno):
+    client, enviados = entorno
+    body = json.dumps(payload_messenger_texto()).encode()
+    resp = client.post("/webhook", data=body,
+                       headers={"Content-Type": "application/json"})
+    assert resp.status_code == 403
+    assert enviados == []
+
+
+def test_messenger_duplicado_se_ignora(entorno):
+    client, enviados = entorno
+    payload = payload_messenger_texto(mid="m.dup")
+    post_meta(client, payload)
+    post_meta(client, payload)
+    assert len(enviados) == 1
+
+
+def test_messenger_cliente_pide_asesor_pausa(entorno, monkeypatch):
+    client, enviados = entorno
+    monkeypatch.setattr(app_module.ai, "responder",
+                        lambda t, txt, *a, **k: (None, True))
+    post_meta(client, payload_messenger_texto(texto="quiero un asesor",
+                                              mid="m.h1"))
+    assert enviados == [("PSID123", app_module.MENSAJE_PASO_ASESOR)]
+    # Queda pausado para ese PSID.
+    monkeypatch.setattr(app_module.ai, "responder",
+                        lambda t, txt, *a, **k: ("no enviar", False))
+    post_meta(client, payload_messenger_texto(texto="hola", mid="m.h2"))
+    assert len(enviados) == 1
+
+
+def test_messenger_echo_de_agente_pausa_y_reactiva(entorno):
+    client, enviados = entorno
+    # Un agente humano escribe desde la Bandeja (eco sin app_id).
+    post_meta(client, payload_messenger_texto(
+        texto="En seguida un asesor te atenderá", mid="e.1", echo=True))
+    post_meta(client, payload_messenger_texto(texto="hola", mid="m.1"))
+    assert enviados == []  # pausado
+
+    post_meta(client, payload_messenger_texto(
+        texto="#bot-on", mid="e.2", echo=True))
+    post_meta(client, payload_messenger_texto(texto="hola otra vez", mid="m.2"))
+    assert len(enviados) == 1
+
+
+def test_messenger_echo_propio_del_bot_se_ignora(entorno):
+    client, enviados = entorno
+    # Eco de un envío del propio bot (con app_id): no debe pausar nada.
+    post_meta(client, payload_messenger_texto(
+        texto="un asesor te atenderá", mid="e.9", echo=True, app_id="999"))
+    post_meta(client, payload_messenger_texto(texto="hola", mid="m.9"))
+    assert enviados == [("PSID123", "eco:hola")]
 
 
 # ─── Payload estilo Odoo en /webhook ───

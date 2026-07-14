@@ -19,6 +19,7 @@ from flask import Flask, jsonify, request
 
 import ai
 import config
+import messenger_api
 import odoo_client
 import storage
 import whatsapp_api
@@ -169,7 +170,8 @@ def _procesar_mensaje_meta(mensaje):
     respuesta, quiere_asesor = ai.responder(telefono, texto or "",
                                             imagen_b64, imagen_mime)
     if quiere_asesor:
-        _pasar_a_asesor(telefono)
+        _pasar_a_asesor(telefono,
+                        lambda t: whatsapp_api.enviar_mensaje(telefono, t))
         return
     whatsapp_api.enviar_mensaje(telefono, respuesta)
     _quizas_crear_lead(telefono, respuesta)
@@ -182,7 +184,8 @@ def _procesar_mensaje_odoo(telefono, texto, odoo_msg_id):
     log.info("Mensaje (vía Odoo) de %s", _mask(telefono))
     respuesta, quiere_asesor = ai.responder(telefono, texto)
     if quiere_asesor:
-        _pasar_a_asesor(telefono)
+        _pasar_a_asesor(telefono,
+                        lambda t: whatsapp_api.enviar_mensaje(telefono, t))
         return
     whatsapp_api.enviar_mensaje(telefono, respuesta)
     if odoo_msg_id:
@@ -190,12 +193,123 @@ def _procesar_mensaje_odoo(telefono, texto, odoo_msg_id):
     _quizas_crear_lead(telefono, respuesta)
 
 
-def _pasar_a_asesor(telefono):
-    """El cliente pidió un asesor humano: se pausa el bot para ese número y se
-    le confirma. Un asesor reactiva el bot luego con la frase o #bot-on."""
-    storage.pausar(telefono)
-    whatsapp_api.enviar_mensaje(telefono, MENSAJE_PASO_ASESOR)
-    log.info("Bot AUTO-PAUSADO: %s pidió pasar con un asesor", _mask(telefono))
+def _pasar_a_asesor(dest_id, enviar):
+    """El cliente pidió un asesor humano: se pausa el bot para ese contacto y
+    se le confirma. Un asesor lo reactiva luego con la frase o #bot-on.
+
+    `dest_id` es la clave con la que se guarda el estado (teléfono en
+    WhatsApp, msgr:<psid> en Messenger) y `enviar` es la función del canal
+    para mandarle el mensaje de confirmación al cliente."""
+    storage.pausar(dest_id)
+    enviar(MENSAJE_PASO_ASESOR)
+    log.info("Bot AUTO-PAUSADO: %s pidió pasar con un asesor", _mask(dest_id))
+
+
+# ─── FACEBOOK MESSENGER (canal directo Meta -> bot) ───
+
+def _clave_messenger(psid):
+    """Namespacea el estado por canal para que un PSID de Messenger nunca
+    choque con un número de WhatsApp."""
+    return f"msgr:{psid}"
+
+
+def _procesar_mensaje_messenger(evento):
+    psid = evento.get("sender", {}).get("id")
+    if not psid:
+        return
+    clave = _clave_messenger(psid)
+    if storage.esta_pausado(clave):
+        log.info("Bot pausado para %s, ignorando", _mask(clave))
+        return
+
+    mensaje = evento.get("message", {})
+    messenger_api.marcar_visto(psid)
+
+    texto = mensaje.get("text")
+    imagen_b64, imagen_mime = None, None
+
+    for adj in mensaje.get("attachments", []) or []:
+        tipo = adj.get("type")
+        url = adj.get("payload", {}).get("url")
+        if tipo == "image" and url:
+            contenido, mime = messenger_api.descargar_adjunto(url)
+            if not contenido:
+                messenger_api.enviar_mensaje(psid, MENSAJE_IMAGEN_FALLIDA)
+                return
+            imagen_b64 = base64.b64encode(contenido).decode()
+            imagen_mime = mime or "image/jpeg"
+        elif tipo == "audio" and url:
+            contenido, mime = messenger_api.descargar_adjunto(url)
+            texto = ai.transcribir(contenido, mime) if contenido else None
+            if not texto:
+                messenger_api.enviar_mensaje(psid, MENSAJE_AUDIO_FALLIDO)
+                return
+        else:
+            messenger_api.enviar_mensaje(psid, MENSAJE_TIPO_NO_SOPORTADO)
+            return
+
+    if not texto and not imagen_b64:
+        return
+
+    log.info("Mensaje Messenger de %s", _mask(clave))
+    respuesta, quiere_asesor = ai.responder(clave, texto or "",
+                                            imagen_b64, imagen_mime)
+    if quiere_asesor:
+        _pasar_a_asesor(clave, lambda t: messenger_api.enviar_mensaje(psid, t))
+        return
+    messenger_api.enviar_mensaje(psid, respuesta)
+
+
+def _procesar_echo_messenger(evento):
+    """Eco de un mensaje enviado por la Página. Si lo escribió un agente
+    humano desde la Bandeja de Meta (sin app_id), sus frases sirven para
+    pausar/reactivar el bot, igual que un asesor en Odoo. Los ecos de los
+    propios envíos del bot (con app_id) se ignoran."""
+    mensaje = evento.get("message", {})
+    if mensaje.get("app_id"):
+        return
+    psid = evento.get("recipient", {}).get("id")
+    if not psid:
+        return
+    clave = _clave_messenger(psid)
+    texto = _normalizar(mensaje.get("text", ""))
+    if COMANDO_PAUSA in texto or any(f in texto for f in FRASES_PAUSA):
+        storage.pausar(clave)
+        log.info("Bot PAUSADO (agente) para %s", _mask(clave))
+    elif COMANDO_REANUDAR in texto or any(f in texto for f in FRASES_REANUDAR):
+        storage.reanudar(clave)
+        log.info("Bot REACTIVADO (agente) para %s", _mask(clave))
+
+
+def _procesar_entrada_messenger(data):
+    if not config.PAGE_ACCESS_TOKEN:
+        log.warning("Llegó un webhook de Messenger pero PAGE_ACCESS_TOKEN no "
+                    "está configurado; se ignora.")
+        return
+    for entry in data.get("entry", []):
+        for evento in entry.get("messaging", []) or []:
+            mensaje = evento.get("message")
+            if not mensaje:
+                continue  # ignora entregas, lecturas, postbacks, etc.
+            mid = mensaje.get("mid")
+            if mid and storage.ya_procesado(f"msgr:{mid}"):
+                continue
+            if mensaje.get("is_echo"):
+                _procesar_echo_messenger(evento)
+            else:
+                _lanzar(_procesar_mensaje_messenger, evento)
+
+
+def _procesar_entrada_whatsapp(data):
+    for entry in data.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for mensaje in value.get("messages", []) or []:
+                msg_id = mensaje.get("id")
+                if msg_id and storage.ya_procesado(f"meta:{msg_id}"):
+                    log.info("Mensaje %s ya procesado, ignorando", msg_id)
+                    continue
+                _lanzar(_procesar_mensaje_meta, mensaje)
 
 
 # ─── RUTAS ───
@@ -220,20 +334,16 @@ def verificar_webhook():
 def recibir_mensaje():
     data = request.get_json(silent=True) or {}
 
-    # Payload directo de Meta (WhatsApp Cloud API).
+    # Payload directo de Meta (WhatsApp Cloud API o Messenger). Se distingue
+    # por el campo "object"; ambos van firmados con el App Secret.
     if "entry" in data:
         if not _firma_meta_valida():
             log.warning("Webhook de Meta con firma inválida, rechazado")
             return "Firma inválida", 403
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                for mensaje in value.get("messages", []) or []:
-                    msg_id = mensaje.get("id")
-                    if msg_id and storage.ya_procesado(f"meta:{msg_id}"):
-                        log.info("Mensaje %s ya procesado, ignorando", msg_id)
-                        continue
-                    _lanzar(_procesar_mensaje_meta, mensaje)
+        if data.get("object") == "page":
+            _procesar_entrada_messenger(data)
+        else:
+            _procesar_entrada_whatsapp(data)
         return jsonify({"status": "ok"}), 200
 
     # Payload reenviado por Odoo (mensaje entrante del cliente).
