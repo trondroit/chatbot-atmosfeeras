@@ -17,6 +17,13 @@ META_APP_SECRET   = os.environ.get("META_APP_SECRET")
 GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION", "v22.0")
 GRAPH_API_URL     = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
+# ─── Facebook Messenger (opcional) ───
+# Token de acceso de la Página de Facebook. Si está definido, el bot
+# atiende también los mensajes de Messenger (object: "page") que Meta
+# entrega en /webhook. La verificación del webhook y la firma se comparten
+# con WhatsApp (VERIFY_TOKEN y META_APP_SECRET).
+PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+
 # ─── OpenAI ───
 OPENAI_API_KEY          = os.environ.get("OPENAI_API_KEY")
 OPENAI_MODEL            = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
