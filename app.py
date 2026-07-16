@@ -205,25 +205,30 @@ def _pasar_a_asesor(dest_id, enviar):
     log.info("Bot AUTO-PAUSADO: %s pidió pasar con un asesor", _mask(dest_id))
 
 
-# ─── FACEBOOK MESSENGER (canal directo Meta -> bot) ───
+# ─── MENSAJERÍA DE META: MESSENGER E INSTAGRAM (canal directo Meta -> bot) ───
+# Messenger e Instagram comparten el mismo formato de webhook (messaging[]) y
+# la misma Send API con el token de la Página; solo cambia el prefijo con el
+# que se guarda el estado, para que los canales nunca se crucen.
 
-def _clave_messenger(psid):
-    """Namespacea el estado por canal para que un PSID de Messenger nunca
-    choque con un número de WhatsApp."""
-    return f"msgr:{psid}"
+# object del webhook -> prefijo de estado
+CANAL_POR_OBJECT = {"page": "msgr", "instagram": "ig"}
 
 
-def _procesar_mensaje_messenger(evento):
-    psid = evento.get("sender", {}).get("id")
-    if not psid:
+def _clave_canal(canal, uid):
+    return f"{canal}:{uid}"
+
+
+def _procesar_mensaje_mensajeria(evento, canal):
+    uid = evento.get("sender", {}).get("id")
+    if not uid:
         return
-    clave = _clave_messenger(psid)
+    clave = _clave_canal(canal, uid)
     if storage.esta_pausado(clave):
         log.info("Bot pausado para %s, ignorando", _mask(clave))
         return
 
     mensaje = evento.get("message", {})
-    messenger_api.marcar_visto(psid)
+    messenger_api.marcar_visto(uid)
 
     texto = mensaje.get("text")
     imagen_b64, imagen_mime = None, None
@@ -234,7 +239,7 @@ def _procesar_mensaje_messenger(evento):
         if tipo == "image" and url:
             contenido, mime = messenger_api.descargar_adjunto(url)
             if not contenido:
-                messenger_api.enviar_mensaje(psid, MENSAJE_IMAGEN_FALLIDA)
+                messenger_api.enviar_mensaje(uid, MENSAJE_IMAGEN_FALLIDA)
                 return
             imagen_b64 = base64.b64encode(contenido).decode()
             imagen_mime = mime or "image/jpeg"
@@ -242,36 +247,36 @@ def _procesar_mensaje_messenger(evento):
             contenido, mime = messenger_api.descargar_adjunto(url)
             texto = ai.transcribir(contenido, mime) if contenido else None
             if not texto:
-                messenger_api.enviar_mensaje(psid, MENSAJE_AUDIO_FALLIDO)
+                messenger_api.enviar_mensaje(uid, MENSAJE_AUDIO_FALLIDO)
                 return
         else:
-            messenger_api.enviar_mensaje(psid, MENSAJE_TIPO_NO_SOPORTADO)
+            messenger_api.enviar_mensaje(uid, MENSAJE_TIPO_NO_SOPORTADO)
             return
 
     if not texto and not imagen_b64:
         return
 
-    log.info("Mensaje Messenger de %s", _mask(clave))
+    log.info("Mensaje %s de %s", canal, _mask(clave))
     respuesta, quiere_asesor = ai.responder(clave, texto or "",
                                             imagen_b64, imagen_mime)
     if quiere_asesor:
-        _pasar_a_asesor(clave, lambda t: messenger_api.enviar_mensaje(psid, t))
+        _pasar_a_asesor(clave, lambda t: messenger_api.enviar_mensaje(uid, t))
         return
-    messenger_api.enviar_mensaje(psid, respuesta)
+    messenger_api.enviar_mensaje(uid, respuesta)
 
 
-def _procesar_echo_messenger(evento):
-    """Eco de un mensaje enviado por la Página. Si lo escribió un agente
-    humano desde la Bandeja de Meta (sin app_id), sus frases sirven para
-    pausar/reactivar el bot, igual que un asesor en Odoo. Los ecos de los
-    propios envíos del bot (con app_id) se ignoran."""
+def _procesar_echo_mensajeria(evento, canal):
+    """Eco de un mensaje enviado por la Página/cuenta. Si lo escribió un
+    agente humano desde la Bandeja de Meta (sin app_id), sus frases sirven
+    para pausar/reactivar el bot, igual que un asesor en Odoo. Los ecos de
+    los propios envíos del bot (con app_id) se ignoran."""
     mensaje = evento.get("message", {})
     if mensaje.get("app_id"):
         return
-    psid = evento.get("recipient", {}).get("id")
-    if not psid:
+    uid = evento.get("recipient", {}).get("id")
+    if not uid:
         return
-    clave = _clave_messenger(psid)
+    clave = _clave_canal(canal, uid)
     texto = _normalizar(mensaje.get("text", ""))
     if COMANDO_PAUSA in texto or any(f in texto for f in FRASES_PAUSA):
         storage.pausar(clave)
@@ -281,10 +286,10 @@ def _procesar_echo_messenger(evento):
         log.info("Bot REACTIVADO (agente) para %s", _mask(clave))
 
 
-def _procesar_entrada_messenger(data):
+def _procesar_entrada_mensajeria(data, canal):
     if not config.PAGE_ACCESS_TOKEN:
-        log.warning("Llegó un webhook de Messenger pero PAGE_ACCESS_TOKEN no "
-                    "está configurado; se ignora.")
+        log.warning("Llegó un webhook de %s pero PAGE_ACCESS_TOKEN no está "
+                    "configurado; se ignora.", canal)
         return
     for entry in data.get("entry", []):
         for evento in entry.get("messaging", []) or []:
@@ -292,12 +297,12 @@ def _procesar_entrada_messenger(data):
             if not mensaje:
                 continue  # ignora entregas, lecturas, postbacks, etc.
             mid = mensaje.get("mid")
-            if mid and storage.ya_procesado(f"msgr:{mid}"):
+            if mid and storage.ya_procesado(f"{canal}:{mid}"):
                 continue
             if mensaje.get("is_echo"):
-                _procesar_echo_messenger(evento)
+                _procesar_echo_mensajeria(evento, canal)
             else:
-                _lanzar(_procesar_mensaje_messenger, evento)
+                _lanzar(_procesar_mensaje_mensajeria, evento, canal)
 
 
 def _procesar_entrada_whatsapp(data):
@@ -340,9 +345,10 @@ def recibir_mensaje():
         if not _firma_meta_valida():
             log.warning("Webhook de Meta con firma inválida, rechazado")
             return "Firma inválida", 403
-        if data.get("object") == "page":
-            _procesar_entrada_messenger(data)
-        else:
+        canal = CANAL_POR_OBJECT.get(data.get("object"))
+        if canal:                       # page -> Messenger, instagram -> Instagram
+            _procesar_entrada_mensajeria(data, canal)
+        else:                           # whatsapp_business_account, etc.
             _procesar_entrada_whatsapp(data)
         return jsonify({"status": "ok"}), 200
 
