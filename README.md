@@ -36,6 +36,7 @@ Odoo y crea leads en el CRM.
 | Variable | Descripción |
 |---|---|
 | `META_APP_SECRET` | App Secret de la app de Meta. Si está definido, se valida la firma `X-Hub-Signature-256` de cada webhook y se rechaza cualquier petición no firmada por Meta. **Sin esto, cualquiera que conozca la URL puede hacer que el bot responda.** |
+| `IG_APP_SECRET` | *Instagram App Secret* (en el producto Instagram → configuración de la API). La API de Instagram firma sus webhooks con este secreto, distinto del de Facebook. Se acepta la firma si coincide con `META_APP_SECRET` **o** con este. Necesario para validar los webhooks de Instagram. |
 | `WEBHOOK_SALIENTE_TOKEN` | Token compartido para los webhooks que manda Odoo. Odoo debe enviarlo en el header `X-Webhook-Token` (o como `?token=...` en la URL). Protege la pausa/reactivación del bot y el webhook de mensajes vía Odoo. |
 
 ### Facebook Messenger e Instagram (opcional)

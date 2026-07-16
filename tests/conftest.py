@@ -25,6 +25,10 @@ def firmar(body: bytes) -> str:
     return "sha256=" + hmac.new(b"secreto-test", body, hashlib.sha256).hexdigest()
 
 
+def firmar_con(body: bytes, secreto: str) -> str:
+    return "sha256=" + hmac.new(secreto.encode(), body, hashlib.sha256).hexdigest()
+
+
 def post_meta(client, payload):
     """POST /webhook con payload de Meta correctamente firmado."""
     body = json.dumps(payload).encode()

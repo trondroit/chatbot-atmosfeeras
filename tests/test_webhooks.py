@@ -1,8 +1,9 @@
 import json
 
+import config
 import app as app_module
-from conftest import (firmar, payload_messenger_texto, payload_meta_texto,
-                      post_meta)
+from conftest import (firmar, firmar_con, payload_messenger_texto,
+                      payload_meta_texto, post_meta)
 
 
 # ─── Verificación del webhook (GET) ───
@@ -213,6 +214,35 @@ def test_messenger_echo_propio_del_bot_se_ignora(entorno):
         texto="un asesor te atenderá", mid="e.9", echo=True, app_id="999"))
     post_meta(client, payload_messenger_texto(texto="hola", mid="m.9"))
     assert enviados == [("PSID123", "eco:hola")]
+
+
+# ─── Firma de Instagram (secreto distinto al de Facebook) ───
+
+def test_instagram_firmado_con_su_propio_secreto_se_acepta(entorno, monkeypatch):
+    client, enviados = entorno
+    monkeypatch.setattr(config, "IG_APP_SECRET", "secreto-instagram")
+    payload = payload_messenger_texto(psid="IGSID1", texto="hola ig",
+                                      mid="ig.s1", obj="instagram")
+    body = json.dumps(payload).encode()
+    resp = client.post("/webhook", data=body, headers={
+        "Content-Type": "application/json",
+        "X-Hub-Signature-256": firmar_con(body, "secreto-instagram"),
+    })
+    assert resp.status_code == 200
+    assert enviados == [("IGSID1", "eco:hola ig")]
+
+
+def test_firma_que_no_coincide_con_ningun_secreto_se_rechaza(entorno, monkeypatch):
+    client, enviados = entorno
+    monkeypatch.setattr(config, "IG_APP_SECRET", "secreto-instagram")
+    payload = payload_messenger_texto(obj="instagram")
+    body = json.dumps(payload).encode()
+    resp = client.post("/webhook", data=body, headers={
+        "Content-Type": "application/json",
+        "X-Hub-Signature-256": firmar_con(body, "secreto-equivocado"),
+    })
+    assert resp.status_code == 403
+    assert enviados == []
 
 
 # ─── Instagram (mismo formato y misma Send API que Messenger) ───
