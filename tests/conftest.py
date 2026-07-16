@@ -54,7 +54,7 @@ def payload_meta_texto(telefono="5215550001111", texto="hola", msg_id="wamid.1")
 
 
 def payload_messenger_texto(psid="PSID123", texto="hola", mid="m.1", echo=False,
-                            app_id=None):
+                            app_id=None, obj="page"):
     mensaje = {"mid": mid}
     if echo:
         mensaje["is_echo"] = True
@@ -68,7 +68,7 @@ def payload_messenger_texto(psid="PSID123", texto="hola", mid="m.1", echo=False,
     else:
         evento["sender"] = {"id": psid}
         evento["recipient"] = {"id": "PAGE"}
-    return {"object": "page", "entry": [{"messaging": [evento]}]}
+    return {"object": obj, "entry": [{"messaging": [evento]}]}
 
 
 @pytest.fixture

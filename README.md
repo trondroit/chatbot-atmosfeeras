@@ -14,7 +14,7 @@ Odoo y crea leads en el CRM.
 | `prompts.py` | Prompt del sistema (personalidad y conocimiento del asesor) |
 | `ai.py` | Llamadas a OpenAI: respuestas, análisis de fotos, transcripción de audios |
 | `whatsapp_api.py` | API de WhatsApp Cloud: enviar, marcar leído, descargar media |
-| `messenger_api.py` | Send API de Facebook Messenger: enviar, indicadores, descargar adjuntos |
+| `messenger_api.py` | Send API de Meta (Messenger e Instagram): enviar, indicadores, descargar adjuntos |
 | `odoo_client.py` | XML-RPC de Odoo: registrar respuestas y crear leads |
 | `storage.py` | Estado persistente: historiales, pausados y deduplicación (Redis o archivo) |
 | `chatbot_whatsapp.py` | Shim de compatibilidad para los comandos de arranque anteriores |
@@ -38,21 +38,33 @@ Odoo y crea leads en el CRM.
 | `META_APP_SECRET` | App Secret de la app de Meta. Si está definido, se valida la firma `X-Hub-Signature-256` de cada webhook y se rechaza cualquier petición no firmada por Meta. **Sin esto, cualquiera que conozca la URL puede hacer que el bot responda.** |
 | `WEBHOOK_SALIENTE_TOKEN` | Token compartido para los webhooks que manda Odoo. Odoo debe enviarlo en el header `X-Webhook-Token` (o como `?token=...` en la URL). Protege la pausa/reactivación del bot y el webhook de mensajes vía Odoo. |
 
-### Facebook Messenger (opcional)
+### Facebook Messenger e Instagram (opcional)
 
 | Variable | Descripción |
 |---|---|
-| `PAGE_ACCESS_TOKEN` | Token de acceso de la Página de Facebook. Si está definido, el bot atiende también los mensajes de Messenger que Meta entrega en `/webhook` (evento `object: "page"`). La verificación del webhook y la firma se comparten con WhatsApp (`VERIFY_TOKEN` y `META_APP_SECRET`). Sin este token, los eventos de Messenger se ignoran. |
+| `PAGE_ACCESS_TOKEN` | Token de acceso de la Página de Facebook. Si está definido, el bot atiende también **Messenger** (evento `object: "page"`) e **Instagram** (evento `object: "instagram"`) que Meta entrega en `/webhook`. La verificación del webhook y la firma se comparten con WhatsApp (`VERIFY_TOKEN` y `META_APP_SECRET`). Sin este token, esos eventos se ignoran. |
 
-Para conectarlo en Meta for Developers: agrega el producto **Messenger** a la
-misma app, genera el **Page Access Token** de tu Página, y en **Webhooks**
-suscribe el objeto **page** a los campos `messages` y `messaging_postbacks`
-(y `message_echoes` si quieres que un agente humano pueda pausar/reactivar el
-bot desde la Bandeja de entrada de Meta Business Suite). El Callback URL es el
-mismo `/webhook` de este servicio.
+Ambos canales usan el mismo formato de webhook (`messaging[]`) y la misma
+Send API con el token de la Página; el estado se guarda con un prefijo por
+canal (`msgr:<psid>` para Messenger, `ig:<igsid>` para Instagram) para que
+nunca se crucen entre sí ni con los números de WhatsApp.
 
-Instagram usa exactamente esta misma Send API y llega al mismo `/webhook`
-(evento `object: "instagram"`); se puede habilitar con muy pocos cambios.
+**Messenger** — en Meta for Developers: agrega el caso de uso / producto
+**Messenger**, conecta tu Página y genera el **Page Access Token**, y en
+**Webhooks** suscribe el objeto **page** a `messages`, `messaging_postbacks`
+y `message_echoes` (este último permite que un agente humano pause/reactive
+el bot desde la Bandeja de Meta Business Suite). Callback URL: el mismo
+`/webhook`.
+
+**Instagram** — la cuenta de Instagram profesional debe estar vinculada a esa
+Página de Facebook. Agrega el caso de uso de **mensajería de Instagram**,
+concede el permiso `instagram_manage_messages` y suscribe el objeto
+**instagram** al campo `messages`. Usa el mismo `PAGE_ACCESS_TOKEN` y el mismo
+`/webhook`.
+
+> Token permanente recomendado: genera el `PAGE_ACCESS_TOKEN` con un *System
+> User* en Business Settings (sin caducidad) para que el bot no deje de
+> responder cuando expire un token temporal.
 
 ### Odoo (opcionales)
 
@@ -115,14 +127,15 @@ El comando anterior `gunicorn chatbot_whatsapp:app` sigue funcionando
   `[PASAR_A_ASESOR]`), el bot se **pausa solo** para ese número y le confirma
   al cliente que un asesor le atenderá. El equipo ve la conversación en Odoo
   y la toma; luego reactiva el bot con la frase de siempre o con `#bot-on`.
-- **Facebook Messenger** (si `PAGE_ACCESS_TOKEN` está configurado): el mismo
-  bot atiende los mensajes de Messenger directo desde Meta (texto, fotos y
-  notas de voz). El estado se guarda por canal (`msgr:<psid>`), así que un
-  usuario de Messenger nunca se cruza con un número de WhatsApp. El paso a
-  asesor funciona igual; y si un agente humano responde desde la Bandeja de
-  Meta Business Suite, sus frases («un asesor te atenderá», `#bot-off`,
-  `#bot-on`, etc.) pausan/reactivan el bot igual que un asesor en Odoo
-  (requiere suscribir `message_echoes`).
+- **Facebook Messenger e Instagram** (si `PAGE_ACCESS_TOKEN` está
+  configurado): el mismo bot atiende los mensajes de Messenger e Instagram
+  directo desde Meta (texto, fotos y notas de voz). El estado se guarda por
+  canal (`msgr:<psid>`, `ig:<igsid>`), así que los canales nunca se cruzan
+  entre sí ni con los números de WhatsApp. El paso a asesor funciona igual; y
+  si un agente humano responde desde la Bandeja de Meta Business Suite, sus
+  frases («un asesor te atenderá», `#bot-off`, `#bot-on`, etc.)
+  pausan/reactivan el bot igual que un asesor en Odoo (requiere suscribir
+  `message_echoes`).
 - **Leads**: con `ODOO_CREAR_LEADS=1`, cuando el bot ofrece canalizar con un
   asesor se crea automáticamente un lead en el CRM de Odoo con el resumen de
   la conversación.

@@ -215,6 +215,28 @@ def test_messenger_echo_propio_del_bot_se_ignora(entorno):
     assert enviados == [("PSID123", "eco:hola")]
 
 
+# ─── Instagram (mismo formato y misma Send API que Messenger) ───
+
+def test_instagram_texto_se_responde(entorno):
+    client, enviados = entorno
+    resp = post_meta(client, payload_messenger_texto(
+        psid="IGSID9", texto="hola por IG", mid="ig.1", obj="instagram"))
+    assert resp.status_code == 200
+    assert enviados == [("IGSID9", "eco:hola por IG")]
+
+
+def test_instagram_e_messenger_no_se_cruzan(entorno):
+    client, enviados = entorno
+    # Mismo id en ambos canales: el estado se guarda por separado (msgr: vs ig:).
+    post_meta(client, payload_messenger_texto(
+        psid="MISMO", texto="soy messenger", mid="mx.1", obj="page"))
+    post_meta(client, payload_messenger_texto(
+        psid="MISMO", texto="soy instagram", mid="ig.2", obj="instagram"))
+    assert ("MISMO", "eco:soy messenger") in enviados
+    assert ("MISMO", "eco:soy instagram") in enviados
+    assert len(enviados) == 2
+
+
 # ─── Payload estilo Odoo en /webhook ───
 
 def test_mensaje_via_odoo_requiere_token(entorno):
