@@ -85,9 +85,9 @@ def entorno(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module.whatsapp_api, "marcar_leido",
                         lambda mid: None)
     monkeypatch.setattr(app_module.messenger_api, "enviar_mensaje",
-                        lambda psid, txt: enviados.append((psid, txt)) or True)
+                        lambda uid, txt, canal="msgr": enviados.append((uid, txt)) or True)
     monkeypatch.setattr(app_module.messenger_api, "marcar_visto",
-                        lambda psid, escribiendo=True: None)
+                        lambda uid, canal="msgr": None)
     monkeypatch.setattr(app_module.ai, "responder",
                         lambda tel, txt, *a, **k: (f"eco:{txt}", False))
     monkeypatch.setattr(app_module.odoo_client, "registrar_respuesta",
