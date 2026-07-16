@@ -228,7 +228,7 @@ def _procesar_mensaje_mensajeria(evento, canal):
         return
 
     mensaje = evento.get("message", {})
-    messenger_api.marcar_visto(uid)
+    messenger_api.marcar_visto(uid, canal)
 
     texto = mensaje.get("text")
     imagen_b64, imagen_mime = None, None
@@ -239,7 +239,7 @@ def _procesar_mensaje_mensajeria(evento, canal):
         if tipo == "image" and url:
             contenido, mime = messenger_api.descargar_adjunto(url)
             if not contenido:
-                messenger_api.enviar_mensaje(uid, MENSAJE_IMAGEN_FALLIDA)
+                messenger_api.enviar_mensaje(uid, MENSAJE_IMAGEN_FALLIDA, canal)
                 return
             imagen_b64 = base64.b64encode(contenido).decode()
             imagen_mime = mime or "image/jpeg"
@@ -247,10 +247,10 @@ def _procesar_mensaje_mensajeria(evento, canal):
             contenido, mime = messenger_api.descargar_adjunto(url)
             texto = ai.transcribir(contenido, mime) if contenido else None
             if not texto:
-                messenger_api.enviar_mensaje(uid, MENSAJE_AUDIO_FALLIDO)
+                messenger_api.enviar_mensaje(uid, MENSAJE_AUDIO_FALLIDO, canal)
                 return
         else:
-            messenger_api.enviar_mensaje(uid, MENSAJE_TIPO_NO_SOPORTADO)
+            messenger_api.enviar_mensaje(uid, MENSAJE_TIPO_NO_SOPORTADO, canal)
             return
 
     if not texto and not imagen_b64:
@@ -260,9 +260,10 @@ def _procesar_mensaje_mensajeria(evento, canal):
     respuesta, quiere_asesor = ai.responder(clave, texto or "",
                                             imagen_b64, imagen_mime)
     if quiere_asesor:
-        _pasar_a_asesor(clave, lambda t: messenger_api.enviar_mensaje(uid, t))
+        _pasar_a_asesor(clave,
+                        lambda t: messenger_api.enviar_mensaje(uid, t, canal))
         return
-    messenger_api.enviar_mensaje(uid, respuesta)
+    messenger_api.enviar_mensaje(uid, respuesta, canal)
 
 
 def _procesar_echo_mensajeria(evento, canal):
