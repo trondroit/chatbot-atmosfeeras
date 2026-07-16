@@ -14,6 +14,9 @@ PHONE_NUMBER_ID   = os.environ.get("PHONE_NUMBER_ID")
 # App Secret de la app de Meta. Si está definido, se valida la firma
 # X-Hub-Signature-256 de cada webhook entrante (muy recomendado).
 META_APP_SECRET   = os.environ.get("META_APP_SECRET")
+# La API de Instagram firma sus webhooks con el "Instagram App Secret", que
+# es distinto del App Secret de Facebook. Si se define, también se acepta.
+IG_APP_SECRET     = os.environ.get("IG_APP_SECRET")
 GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION", "v22.0")
 GRAPH_API_URL     = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 

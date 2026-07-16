@@ -83,18 +83,23 @@ def _lanzar(func, *args):
 # ─── SEGURIDAD DE WEBHOOKS ───
 
 def _firma_meta_valida():
-    """Verifica la firma X-Hub-Signature-256 con el App Secret de Meta."""
-    if not config.META_APP_SECRET:
-        log.warning("META_APP_SECRET no está configurado: el webhook acepta "
+    """Verifica la firma X-Hub-Signature-256. Se acepta si coincide con el App
+    Secret de Facebook (WhatsApp/Messenger) o con el App Secret de Instagram,
+    porque la API de Instagram firma sus webhooks con un secreto distinto."""
+    secretos = [s for s in (config.META_APP_SECRET, config.IG_APP_SECRET) if s]
+    if not secretos:
+        log.warning("No hay App Secret configurado: el webhook acepta "
                     "peticiones sin verificar la firma. Configúralo cuanto antes.")
         return True
     firma = request.headers.get("X-Hub-Signature-256", "")
-    esperada = "sha256=" + hmac.new(
-        config.META_APP_SECRET.encode(),
-        request.get_data(),
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(firma, esperada)
+    cuerpo = request.get_data()
+    for secreto in secretos:
+        esperada = "sha256=" + hmac.new(
+            secreto.encode(), cuerpo, hashlib.sha256
+        ).hexdigest()
+        if hmac.compare_digest(firma, esperada):
+            return True
+    return False
 
 
 def _token_odoo_valido():
