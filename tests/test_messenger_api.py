@@ -8,6 +8,18 @@ def test_url_y_token_messenger():
     assert token == config.PAGE_ACCESS_TOKEN
 
 
+def test_url_messenger_usa_page_id_si_esta_definido(monkeypatch):
+    monkeypatch.setattr(config, "PAGE_ID", "210051202192476")
+    url, _ = messenger_api._url_y_token("msgr")
+    assert url.endswith("/210051202192476/messages")
+
+
+def test_url_messenger_usa_me_sin_page_id(monkeypatch):
+    monkeypatch.setattr(config, "PAGE_ID", None)
+    url, _ = messenger_api._url_y_token("msgr")
+    assert url.endswith("/me/messages")
+
+
 def test_url_y_token_instagram_con_token_propio(monkeypatch):
     monkeypatch.setattr(config, "IG_ACCESS_TOKEN", "ig-token-xyz")
     url, token = messenger_api._url_y_token("ig")
