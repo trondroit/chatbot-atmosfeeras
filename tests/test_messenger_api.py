@@ -1,5 +1,14 @@
+import pytest
+
 import config
 import messenger_api
+import storage
+
+
+@pytest.fixture(autouse=True)
+def _backend_limpio(tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "_backend",
+                        storage.FileStorage(str(tmp_path / "estado.json")))
 
 
 def test_url_y_token_messenger():
