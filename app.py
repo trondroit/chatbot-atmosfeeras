@@ -19,7 +19,6 @@ from flask import Flask, jsonify, request
 
 import ai
 import config
-import ig_token
 import messenger_api
 import odoo_client
 import storage
@@ -28,9 +27,6 @@ import whatsapp_api
 log = logging.getLogger("chatbot")
 
 app = Flask(__name__)
-
-# Mantiene vivo el token de Instagram (se renueva solo antes de caducar).
-ig_token.iniciar_renovador()
 
 # Frases con las que un asesor pausa/reactiva el bot desde Odoo. Se comparan
 # sin acentos ni mayúsculas. Se aceptan la frase histórica con error de dedo

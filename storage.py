@@ -32,7 +32,6 @@ class FileStorage:
         self._historiales = {}
         self._pausados = set()
         self._procesados = {}  # clave -> timestamp
-        self._ig_token = {}
         self._cargar()
 
     def _cargar(self):
@@ -42,7 +41,6 @@ class FileStorage:
             self._historiales = data.get("historiales", {})
             self._pausados = set(data.get("pausados", []))
             self._procesados = data.get("procesados", {})
-            self._ig_token = data.get("ig_token", {})
             return
         except FileNotFoundError:
             pass
@@ -64,7 +62,6 @@ class FileStorage:
                     "historiales": self._historiales,
                     "pausados": sorted(self._pausados),
                     "procesados": self._procesados,
-                    "ig_token": self._ig_token,
                 }, f, ensure_ascii=False)
             os.replace(tmp, self._ruta)
         except OSError as e:
@@ -109,15 +106,6 @@ class FileStorage:
             self._guardar()
             return False
 
-    def leer_ig_token(self):
-        with self._lock:
-            return dict(self._ig_token) if self._ig_token else None
-
-    def guardar_ig_token(self, info):
-        with self._lock:
-            self._ig_token = dict(info)
-            self._guardar()
-
 
 class RedisStorage:
     """Estado en Redis: compartido entre workers y persistente."""
@@ -152,13 +140,6 @@ class RedisStorage:
         creado = self._r.set(f"chatbot:procesado:{clave}", "1",
                              nx=True, ex=DEDUP_TTL_SEGUNDOS)
         return not creado
-
-    def leer_ig_token(self):
-        raw = self._r.get("chatbot:ig_token")
-        return json.loads(raw) if raw else None
-
-    def guardar_ig_token(self, info):
-        self._r.set("chatbot:ig_token", json.dumps(info))
 
 
 _backend = None
@@ -209,11 +190,3 @@ def reanudar(telefono):
 
 def ya_procesado(clave):
     return get_backend().ya_procesado(clave)
-
-
-def leer_ig_token():
-    return get_backend().leer_ig_token()
-
-
-def guardar_ig_token(info):
-    get_backend().guardar_ig_token(info)
