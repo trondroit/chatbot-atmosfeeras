@@ -36,11 +36,7 @@ PAGE_ID           = os.environ.get("PAGE_ID")
 # Instagram intenta usar PAGE_ACCESS_TOKEN por la Graph de Facebook (sirve
 # cuando la cuenta de IG está ligada a la Página con ese token).
 IG_ACCESS_TOKEN = os.environ.get("IG_ACCESS_TOKEN")
-IG_GRAPH_HOST   = "https://graph.instagram.com"
-IG_GRAPH_URL    = f"{IG_GRAPH_HOST}/{GRAPH_API_VERSION}"
-# El token de Instagram caduca (~60 días). El auto-renovador lo refresca
-# solo cuando le quedan menos de estos días de vida.
-IG_TOKEN_DIAS_MARGEN = int(os.environ.get("IG_TOKEN_DIAS_MARGEN", "20"))
+IG_GRAPH_URL    = f"https://graph.instagram.com/{GRAPH_API_VERSION}"
 
 # ─── OpenAI ───
 OPENAI_API_KEY          = os.environ.get("OPENAI_API_KEY")
