@@ -17,10 +17,15 @@ TIMEOUT = 15
 
 def _url_y_token(canal):
     """Devuelve (url, token) según el canal. Instagram usa su propia API y su
-    propio token si está configurado; si no, cae a la Página de Facebook."""
+    propio token si está configurado; si no, cae a la Página de Facebook.
+
+    Para Messenger se usa /{PAGE_ID}/messages cuando PAGE_ID está definido (así
+    funciona incluso con tokens de usuario del sistema, donde "me" no resuelve
+    a la Página); si no, se usa /me/messages."""
     if canal == "ig" and config.IG_ACCESS_TOKEN:
         return f"{config.IG_GRAPH_URL}/me/messages", config.IG_ACCESS_TOKEN
-    return f"{config.GRAPH_API_URL}/me/messages", config.PAGE_ACCESS_TOKEN
+    destino = config.PAGE_ID or "me"
+    return f"{config.GRAPH_API_URL}/{destino}/messages", config.PAGE_ACCESS_TOKEN
 
 
 def enviar_mensaje(uid, texto, canal="msgr"):

@@ -26,6 +26,10 @@ GRAPH_API_URL     = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 # entrega en /webhook. La verificación del webhook y la firma se comparten
 # con WhatsApp (VERIFY_TOKEN y META_APP_SECRET).
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+# ID numérico de la Página de Facebook. Si se define, Messenger envía por
+# /{PAGE_ID}/messages en vez de /me/messages; así funciona también con
+# tokens de usuario del sistema (donde "me" no resuelve a la Página).
+PAGE_ID           = os.environ.get("PAGE_ID")
 
 # Token propio de la cuenta de Instagram (se genera aparte del de la Página).
 # Instagram envía por su propia API (graph.instagram.com). Si no se define,

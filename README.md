@@ -44,6 +44,7 @@ Odoo y crea leads en el CRM.
 | Variable | Descripción |
 |---|---|
 | `PAGE_ACCESS_TOKEN` | Token de acceso de la Página de Facebook. Si está definido, el bot atiende también **Messenger** (evento `object: "page"`) e **Instagram** (evento `object: "instagram"`) que Meta entrega en `/webhook`. La verificación del webhook y la firma se comparten con WhatsApp (`VERIFY_TOKEN` y `META_APP_SECRET`). Sin este token, esos eventos se ignoran. |
+| `PAGE_ID` | ID numérico de la Página de Facebook. Recomendado cuando el `PAGE_ACCESS_TOKEN` es un token de **usuario del sistema** (permanente): Messenger envía por `/{PAGE_ID}/messages` en vez de `/me/messages`, donde `me` no resuelve a la Página. Sin él se usa `/me/messages`. |
 | `IG_ACCESS_TOKEN` | Token propio de la cuenta de Instagram (se genera aparte del de la Página). Si está definido, las respuestas de Instagram salen por su API (`graph.instagram.com`). Si no, Instagram intenta usar `PAGE_ACCESS_TOKEN` por la Graph de Facebook (sirve cuando la cuenta de IG está ligada a la Página con ese token). Opcional. |
 
 Ambos canales usan el mismo formato de webhook (`messaging[]`) y la misma
