@@ -9,6 +9,7 @@ import logging
 import requests
 
 import config
+import ig_token
 
 log = logging.getLogger(__name__)
 
@@ -17,13 +18,15 @@ TIMEOUT = 15
 
 def _url_y_token(canal):
     """Devuelve (url, token) según el canal. Instagram usa su propia API y su
-    propio token si está configurado; si no, cae a la Página de Facebook.
+    token vigente (renovado automáticamente); si no hay, cae a la Página.
 
     Para Messenger se usa /{PAGE_ID}/messages cuando PAGE_ID está definido (así
     funciona incluso con tokens de usuario del sistema, donde "me" no resuelve
     a la Página); si no, se usa /me/messages."""
-    if canal == "ig" and config.IG_ACCESS_TOKEN:
-        return f"{config.IG_GRAPH_URL}/me/messages", config.IG_ACCESS_TOKEN
+    if canal == "ig":
+        token = ig_token.obtener_token()
+        if token:
+            return f"{config.IG_GRAPH_URL}/me/messages", token
     destino = config.PAGE_ID or "me"
     return f"{config.GRAPH_API_URL}/{destino}/messages", config.PAGE_ACCESS_TOKEN
 

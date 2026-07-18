@@ -16,7 +16,8 @@ Odoo y crea leads en el CRM.
 | `whatsapp_api.py` | API de WhatsApp Cloud: enviar, marcar leído, descargar media |
 | `messenger_api.py` | Send API de Meta (Messenger e Instagram): enviar, indicadores, descargar adjuntos |
 | `odoo_client.py` | XML-RPC de Odoo: registrar respuestas y crear leads |
-| `storage.py` | Estado persistente: historiales, pausados y deduplicación (Redis o archivo) |
+| `storage.py` | Estado persistente: historiales, pausados, deduplicación y token de IG (Redis o archivo) |
+| `ig_token.py` | Auto-renovador del token de Instagram (lo refresca antes de que caduque) |
 | `chatbot_whatsapp.py` | Shim de compatibilidad para los comandos de arranque anteriores |
 | `tests/` | Pruebas automatizadas (pytest) |
 
@@ -45,7 +46,8 @@ Odoo y crea leads en el CRM.
 |---|---|
 | `PAGE_ACCESS_TOKEN` | Token de acceso de la Página de Facebook. Si está definido, el bot atiende también **Messenger** (evento `object: "page"`) e **Instagram** (evento `object: "instagram"`) que Meta entrega en `/webhook`. La verificación del webhook y la firma se comparten con WhatsApp (`VERIFY_TOKEN` y `META_APP_SECRET`). Sin este token, esos eventos se ignoran. |
 | `PAGE_ID` | ID numérico de la Página de Facebook. Recomendado cuando el `PAGE_ACCESS_TOKEN` es un token de **usuario del sistema** (permanente): Messenger envía por `/{PAGE_ID}/messages` en vez de `/me/messages`, donde `me` no resuelve a la Página. Sin él se usa `/me/messages`. |
-| `IG_ACCESS_TOKEN` | Token propio de la cuenta de Instagram (se genera aparte del de la Página). Si está definido, las respuestas de Instagram salen por su API (`graph.instagram.com`). Si no, Instagram intenta usar `PAGE_ACCESS_TOKEN` por la Graph de Facebook (sirve cuando la cuenta de IG está ligada a la Página con ese token). Opcional. |
+| `IG_ACCESS_TOKEN` | Token propio de la cuenta de Instagram (se genera aparte del de la Página). Si está definido, las respuestas de Instagram salen por su API (`graph.instagram.com`). Si no, Instagram intenta usar `PAGE_ACCESS_TOKEN` por la Graph de Facebook. Este token caduca (~60 días) pero **se renueva solo** (ver abajo); se pone una vez. Opcional. |
+| `IG_TOKEN_DIAS_MARGEN` | Días de vida restantes por debajo de los cuales el auto-renovador refresca el token de Instagram. Default `20`. |
 
 Ambos canales usan el mismo formato de webhook (`messaging[]`) y la misma
 Send API con el token de la Página; el estado se guarda con un prefijo por
@@ -142,6 +144,13 @@ El comando anterior `gunicorn chatbot_whatsapp:app` sigue funcionando
 - **Leads**: con `ODOO_CREAR_LEADS=1`, cuando el bot ofrece canalizar con un
   asesor se crea automáticamente un lead en el CRM de Odoo con el resumen de
   la conversación.
+- **Auto-renovación del token de Instagram**: el token de IG caduca a los ~60
+  días. Al arrancar, el bot lanza un hilo (`ig_token.py`) que cada 12 h revisa
+  cuánta vida le queda y, si baja del margen (`IG_TOKEN_DIAS_MARGEN`), llama a
+  `refresh_access_token` para extenderlo otros ~60 días y guarda el token nuevo
+  en el almacenamiento (Redis). El `PAGE_ACCESS_TOKEN` de Messenger, en cambio,
+  no caduca si se genera con un usuario del sistema (ver arriba). Con Redis y el
+  bot en línea, no hay que renovar tokens manualmente.
 
 ## Pruebas
 
