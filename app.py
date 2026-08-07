@@ -77,6 +77,9 @@ def _lanzar(func, *args):
     """Ejecuta el procesamiento en segundo plano para responder el webhook
     de inmediato (si Meta no recibe el 200 rápido, reintenta y se duplican
     los mensajes)."""
+    if not config.ACTIVO:
+        log.info("Bot desactivado (ACTIVO=no), mensaje ignorado.")
+        return
     threading.Thread(target=func, args=args, daemon=True).start()
 
 
