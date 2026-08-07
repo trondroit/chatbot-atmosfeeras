@@ -68,3 +68,7 @@ DATA_DIR  = os.environ.get("DATA_DIR", "/tmp")
 
 # Cuántos mensajes de historial se conservan por número de teléfono.
 HISTORIAL_MAX = int(os.environ.get("HISTORIAL_MAX", "30"))
+
+# ─── Control del bot ───
+# ACTIVO=no desactiva el bot globalmente sin apagar el servidor.
+ACTIVO = os.environ.get("ACTIVO", "si").strip().lower() == "si"
